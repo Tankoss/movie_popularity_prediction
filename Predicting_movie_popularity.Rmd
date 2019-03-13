@@ -1,0 +1,766 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Load Packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(BAS)
+library(gridExtra)
+```
+
+## Load Data
+
+```{r load-data}
+# loading database
+load("movies.Rdata")
+```
+
+## The Purpouse of the Analysis
+
+The main question posed to this analysis is to determine what attributes make a movie popular. This information will help filmmakers to focus on attributes which contribute to higher movie ratings and audience acceptance, potential investors have a financial interest in developing movies that will be popular within wide auditory, and of course, film lovers, who want to spend time and money watching the movies they really enjoy. But what is popularity? How to define that one single success measurement of the movie?
+   
+## Data Understanding
+
+In this analysis, we are going to work with the dataset containing the information from Rotten Tomatoes, the website which aggregates film reviews from professional movie critics and amateurs and IMDB (Internet Movie Database), an online database of information related to the world of films, television programs, video games, etc. The dataset includes 651 movies and 32 categorical and numerical variables, giving the following information to the analysis:
+
+```{r}
+# column names of dataset 
+names(movies)
+```
+
+The observations were randomly sampled from the population, hence this is an observational study which will not reveal a causal relationship between variables, we can only generalize analysis results to the population at large.
+
+Based on the features in the dataset, the best representations of movie popularity are audience_score and imdb_rating. Since these two features illustrate the numerical estimation of movie perception by the audience, it does not matter which one to use as a response variable. Thus, we will build a model to predict audience_score of future movies.
+
+## Data Exploration
+
+Now we are ready to dive deeper into our dataset and discover some interesting dependencies between variables. 
+
+### Title Type, Genre, MPAA Rating
+
+Let's start with exploring categorical variables `title_type`, `genre`, `mpaa_rating` these features provide general information about movies.
+
+```{r}
+# creating data frame with proportions
+prop_title <- table(movies$title_type)
+prop_title <- round(prop.table(prop_title)*100, digits = 1)
+prop_title <- as.data.frame(prop_title)
+prop_title <- prop_title %>%
+  arrange(desc(Freq)) %>%
+  mutate(Var1 = factor(Var1, levels = Var1))
+
+# plotting bar plot with proportions
+  ggplot(prop_title, aes(x = Var1, y = Freq, fill = Var1)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_text(aes(label = paste(Freq, "%")), hjust = - 0.1, color="black", size=3.5) +
+  theme_classic() +
+  coord_flip(ylim = c(0,100)) +
+  labs(title = "Movie Types Proportion", x = "Type of movie", y = "Frequency in %") +
+  scale_fill_discrete(name = "Movie types") 
+  
+```
+
+As can be seen on the plot, over a 90% of observations in the dataset fall into Feature Film category. Since TV Movie type has only 0.8% of all observations, we can safely make a transformation by creting `feature_film` variable with two levels Yes and No. 
+
+```{r}
+# introducing the variable `feature_film` with two levels 
+movies <- movies %>%
+  mutate(feature_film = as.factor(if_else(title_type == "Feature Film", "Yes", "No")))
+```
+
+`genre` is a categorical variable with 11 levels. Here is a distribution of proportions for different movie genres. 
+
+```{r}
+# greating table with proportions of various movie genres
+prop_genre <- table(movies$genre)
+prop_genre <- round(prop.table(prop_genre)*100, digits = 1)
+prop_genre <- as.data.frame(prop_genre) %>%
+  arrange(desc(Freq)) %>%
+  mutate(Var1 = factor(Var1, levels = (Var1)))
+
+# depicting bar plot with movie genre proportions
+ggplot(prop_genre, aes(x = Var1, y = Freq, fill = Var1)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_text(aes(label = paste(Freq, "%")), hjust = -0.1, color="black", size=3.5) +
+  theme_classic() +
+  coord_flip(ylim = c(0, 55)) +
+  labs(title = "Movie Genres Proportion", y = "Frequency in %", x = "Genre") +
+  scale_fill_discrete(name = "Genre") 
+
+```
+
+Just like in `title_type` variable, there are genres which rarely occur in this dataset. These levels are underrepresented in the data set. Thus, genres with a proportion less than 2.5% will be placed into bin "Other".
+
+```{r}
+# inroducing new levels to variable `genre`
+movies <- movies %>%
+  mutate( genre = case_when(
+    genre == 'Drama' ~ 'Drama',
+    genre == 'Comedy' ~ 'Comedy',
+    genre == 'Action & Adventure' ~ 'Action & Adventure',
+    genre == 'Mystery & Suspense' ~ 'Mystery & Suspense',
+    genre == 'Documentary' ~ 'Documentary',
+    genre == 'Horror' ~ 'Horror',
+    TRUE ~ 'Other')) %>%
+  mutate(genre = as.factor(genre))
+
+```
+
+MPAA (Motion Picture Association of America) is the film rating system, which provides parents with the information needed to determine if a film is appropriate for their children. In general, the MPAA system ratings has 5 levels, which are shown on the plot below.
+
+```{r}
+# creating a table with proportions for MPAA Rating
+prop_mpaa_rating <- table(movies$mpaa_rating)
+prop_mpaa_rating <- round(prop.table(prop_mpaa_rating)*100, digits = 1)
+prop_mpaa_rating <- as.data.frame(prop_mpaa_rating) %>%
+  arrange(desc(Freq)) %>%
+  mutate(Var1 = factor(Var1, levels = (Var1)))
+
+# adding a bar plot with proportions
+ggplot(prop_mpaa_rating, aes(x = Var1, y = Freq, fill = Var1)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_text(aes(label = paste(Freq, "%")), hjust = -0.1, color="black", size=3.5) +
+  theme_classic() +
+  coord_flip(ylim = c(0, 55)) +
+  labs(title = "Movie MPAA Ratings Proportion", y = "Frequency in %", x = "Rating") +
+  scale_fill_discrete(name = "Rating") 
+
+```
+As can be seen, two levels of the variable `mpaa_rating` NC-17 and G have a small proportion comparing to others. To deal with that we will apply the same approach as with `genre`.
+
+```{r}
+# Transforming mpaa_rating variable
+movies <- movies %>%
+  mutate(mpaa_new = case_when(
+    mpaa_rating == 'R' ~ 'R',
+    mpaa_rating == 'PG-13' ~ 'PG-13',
+    mpaa_rating == 'PG' ~ 'PG',
+    TRUE ~ 'Unrated')) %>%
+  mutate(mpaa_new = as.factor(mpaa_new))
+```
+
+The distribution of the `audience_score` by `mpaa_new` variable after transformation depicted on the boxplot below.
+
+```{r}
+mpaa_median <- movies%>%
+  select(mpaa_new, audience_score) %>%
+  group_by(mpaa_new) %>%
+  mutate(median = median(audience_score)) 
+  
+
+ggplot(movies, aes(x = factor(mpaa_new, levels = c('PG-13', 'R', 'PG', 'Unrated')), y = audience_score, fill = mpaa_new)) + 
+  geom_boxplot() + 
+  theme_classic() +
+  labs(title = "Audience Score by MPAA rating",
+       x = "MPAA Rating",
+       y = "Audience Score") +
+  stat_summary(data = mpaa_median, fun.y = median, colour="black", geom="text", 
+               vjust=-0.5, aes(label=median)) +
+  scale_fill_discrete(name = "MPAA Rating") 
+```
+
+The highest of `audience_score` have unrated movies. Over 50% of all movies in the dataset have rating R and median audience score 64.
+
+### Runtime
+
+Variation in movie length is shown in the histogram below, in which the average movie length (106 minutes) has been indicated with the vertical blue line.
+
+```{r}
+runtime_plot <- movies %>%
+  select(runtime) %>%
+  filter(!is.na(runtime))
+
+ggplot(data = runtime_plot) + 
+  geom_histogram(aes(x = runtime), binwidth = 8, color = 'black', fill = 'turquoise3', alpha = 0.7) +
+  theme_classic() +
+  labs(title = "Runtime",
+       x = "Minutes",
+       y = "Frequency") +
+   annotate(geom = "text", x = mean(runtime_plot$runtime, na.rm = TRUE) + 5, y = 120, 
+           label = paste0(round(mean(runtime_plot$runtime, na.rm = TRUE), digits = 1), 
+                         " min"),
+           color = "black", hjust = 0) +
+  scale_x_continuous(breaks = seq(0, 300, 50)) +
+  scale_y_continuous(breaks = seq(0, 140, 20)) +
+  geom_vline(aes(xintercept = mean(runtime_plot$runtime, na.rm = TRUE)), color = "black", size = 0.5) 
+```
+
+Runtime and Audience score can also depend heavily on the Oscar nomination. The plot below depicting the correlation between `runtime` and our metric of interest `audience_score` for Oscar Nominated movies. A pink color indicates - nominated movies, green - non-nominated. As can be seen, movies that have been nominated for the award have a higher rating and tend to be longer with mean 133.5 min, there also is a small positive correlation (7%) between their audience score and runtime, thus Oscar-nominated movies have higher ratings regardless runtime. Non-nominated movies are a bit different story. They are broadly distributed, with mean 105.6 min and higher correlation 22%, hence longer movies with positive reviews are more frequent. 
+
+```{r}
+# Organizing data for plots
+rt_as_osc_nom <- movies %>%
+  filter(best_pic_nom == "yes", feature_film == "Yes") %>%
+  select(best_pic_nom, audience_score, runtime)
+
+rt_as_osc_not_nom <- movies %>%
+  filter(best_pic_nom == "no", feature_film == "Yes") %>%
+  select(best_pic_nom, audience_score, runtime)
+  
+ggplot() + 
+  geom_point(data = rt_as_osc_not_nom , aes(x = runtime, y = audience_score), color = 'lightseagreen', size = 3, alpha = 0.5) + 
+  geom_point(data = rt_as_osc_nom, aes(x = runtime, y = audience_score), color = 'coral', size = 3, alpha = 0.7) + 
+  geom_smooth(data = rt_as_osc_nom, aes(x = runtime, y = audience_score), 
+              method = lm, color = "coral", se = FALSE) + 
+  geom_smooth(data = rt_as_osc_not_nom, aes(x = runtime, y = audience_score), 
+              method = lm, color = "aquamarine3", se = FALSE) + 
+  annotate(geom = "text", x = 175, y = 90, 
+           label = paste("R =", round(cor(rt_as_osc_nom$runtime,
+                                          rt_as_osc_nom$audience_score,
+                                          use = "complete.obs"), digits = 2)),
+                                          color = "coral", hjust = 0) +
+  annotate(geom = "text", x = 180, y = 80, 
+           label = paste("R =", round(cor(rt_as_osc_not_nom$runtime,  
+                                          rt_as_osc_not_nom$audience_score, 
+                                          use = "complete.obs"), digits = 2)),
+                                          color = "aquamarine3",
+                                          hjust = 0) +
+  labs(title = "Corellation between Runtime and Audience Score by Oscar Nomination",
+       x = "Runtime",
+       y = "Audience Score") +
+theme_classic()
+```
+
+### Theatre release date
+
+Dataset consists of 6 variables which provide information on year, month and day of movie DVD release date and premiere in the theatre. What valuable insights can we get out of this information? Does movie popularity vary by seasons in which movie was released? Do Oscar-nominated movies tend to be released by the end of the year? Is there any chance to increase movie popularity by releasing a movie on the weekend? As for theatre release date, the main area of interest is month and day. 
+
+```{r}
+# Getting movie release month and grouping variable by season 
+movie_rel_date <- movies %>%
+  mutate(thtr_rel_date = paste0(thtr_rel_day, '-', thtr_rel_month, '-', thtr_rel_year)) %>%
+  select(audience_score, thtr_rel_date) %>%
+  mutate(thtr_rel_month = strftime(as.Date(thtr_rel_date), '%B')) %>%
+  mutate(season = case_when(
+         thtr_rel_month %in% c('January', 'February', 'December') ~ 'Winter',
+         thtr_rel_month %in% c('March', 'April', 'May') ~ 'Spring',
+         thtr_rel_month %in% c('June', 'July', 'August') ~ 'Summer',
+         thtr_rel_month %in% c('September', 'October', 'November') ~ 'Autumn',
+         TRUE ~ 'Other')) %>%
+ group_by(thtr_rel_month, season) %>%
+ summarise(median = median(audience_score)) %>%
+ ungroup() %>%  
+ arrange(season, median) %>%
+ mutate(thtr_rel_month = factor(thtr_rel_month, levels = thtr_rel_month))  
+
+ggplot(data = movie_rel_date, aes(x = thtr_rel_month, y = median, fill = season)) +
+  geom_bar(stat = "identity", width = 0.85, color="black") + 
+      labs(title="Audience Score By Movie Released Season", x= "Months", y= "Audience Score") +
+ geom_text(aes(label = round(median)), vjust=1.6, color="black",
+            position = position_dodge(0.9), size=3.5) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.9, hjust=1)) +
+  scale_fill_discrete(name = 'Season')
+
+```
+
+Here we can see a bar plot depicting audience score median by movie released months. It seems that spring is not the best time of the year to release a movie. The highest median tend to receive movies released in December. But how about the proportions of released Oscar-nominated movies each month? 
+
+```{r}
+# preparing data for plot
+oscar_rel_date <- movies %>%
+  mutate(thtr_rel_date = paste0(thtr_rel_day, '-', thtr_rel_month, '-', thtr_rel_year)) %>%
+  select(audience_score, best_pic_nom, thtr_rel_date) %>%
+  filter(best_pic_nom == 'yes') %>%
+  mutate(thtr_rel_month = strftime(as.Date(thtr_rel_date), '%B')) 
+
+prop_oscar <- table(oscar_rel_date$thtr_rel_month)
+prop_oscar <- round(prop.table(prop_oscar)*100, digits = 1)
+prop_oscar <- as.data.frame(prop_oscar) %>%
+  arrange(desc(Freq)) %>%
+  mutate(Var1 = factor(Var1, levels = (Var1)))
+
+ggplot(prop_oscar, aes(x = Var1, y = Freq, fill = Var1)) +
+  geom_bar(stat = "identity", color = "black") +
+  geom_text(aes(label = paste(Freq, "%")), hjust = -0.1, color="black", size=3.5) +
+  theme_classic() +
+  coord_flip(ylim = c(0, 55)) +
+  labs(title = "Oscar Nominated Movie's Release Month", y = "Frequency in %", x = "Month") +
+  scale_fill_discrete(name = "Month") 
+```
+
+Although the number of Oscar-nominated movies in our dataset is very small, roughly 3.4%, and that is not enough to report a trend, we still can notice that over 72% of Oscar-nominated movies were released in December, October or November. According to the information obtained from the plots, 2 new binary variables are introduced. `oscar_season` to group movies released in October, November, and December and `summer_season` to capture May, June, July, and August released movies.  
+
+```{r}
+# introducing two new variables
+movies <- movies %>%
+  mutate(
+    oscar_season = case_when(thtr_rel_month >= 10 & thtr_rel_month <= 12 ~ "Yes", TRUE ~ "No"),
+    summer_season = case_when(thtr_rel_month >= 5 & thtr_rel_month <= 8 ~ "Yes", TRUE ~ "No")) %>%
+  mutate(oscar_season = factor(oscar_season), summer_season = factor(summer_season))
+```
+
+### Weekdays 
+
+Days of the week for movie premiere can also effect popularity. Let's depict this relationship on the plot.
+
+```{r}
+#preparing data for plot
+movie_rel_date <- movies %>%
+  mutate(thtr_rel_date = paste0(thtr_rel_day, '-', thtr_rel_month, '-', thtr_rel_year),
+         weekday = weekdays(as.Date(thtr_rel_date, format = '%d-%m-%Y'))) %>%
+  select(audience_score, weekday)
+
+movie_rel_day <- movie_rel_date %>%
+  group_by(weekday) %>%
+  summarise(median = median(audience_score))
+
+# creating table with proportions to see the frequency of releasing a movie by days of the week
+prop_weekday <- table(movie_rel_date$weekday) 
+prop_weekday <- round(prop.table(prop_weekday)*100, digits = 1)
+prop_weekday <- as.data.frame(prop_weekday) 
+colnames(prop_weekday)[1] <- 'weekday'
+prop_weekday$weekday <- as.character(prop_weekday$weekday)
+movie_rel_day <- left_join(movie_rel_day, prop_weekday, by = 'weekday')
+
+# arranging the levels of weekday  
+  movie_rel_day <- movie_rel_day %>%
+  ungroup() %>%
+  arrange(Freq) %>%
+  mutate(weekday = factor(weekday, levels = weekday))
+
+  ggplot(data = movie_rel_day, aes(x = weekday, y = median, fill = weekday)) +
+  geom_bar(stat = "identity", width = 0.85, color = "black") + 
+  labs(title="Audience Score By Movie Released Day", x= "Days of Week", y= "Audience Score") +
+  geom_text(aes(label = round(median)), vjust=1.6, color="white", size=3.5) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.9, hjust=1)) +
+  scale_fill_discrete(name = 'Days of Week') +
+  scale_y_continuous() +
+  geom_text(aes(label = paste(round(Freq), '%'), vjust = -0.3)) 
+
+```
+
+On the plot above depicted distribution of the movie's audience scores by days of the week it has been released. The bars were arranged in ascending order by the percentage of movies released on that day. These fractions are shown on the top of each bar. White numbers illustrate the median audience scores for movies released on each day.   
+
+```{r}
+# Adding new variable `weekday` to data frame
+movies <- movies %>%
+  mutate(thtr_rel_date = paste0(thtr_rel_day, '-', thtr_rel_month, '-', thtr_rel_year),
+         weekday = weekdays(as.Date(thtr_rel_date, format = '%d-%m-%Y')))
+```
+
+### DVD released date
+
+The information on a DVD release date of the movies is not easy to interpret. As is shown in the table below the earliest DVD was released in 1991, supposedly around the date DVD was actually invented. It means that DVDs for the movies released before 1991 appeared on the market long after the film's premiere in the theatre. However, there are a lot of movies in the data set released after 1991 and the time difference between the date when the movie appeared in the theatre and the date when DVD was released could actually affect the popularity. 
+
+```{r}
+dvd_rel_year_na <- na.exclude(movies$dvd_rel_year)
+
+data_frame("Earliest Movie Release Year" = min(movies$thtr_rel_year), "Earliest DVD Released Year" = min(dvd_rel_year_na))
+```
+
+Here we are introducing a new variable based on the difference in months between theatre and DVD appearance of the movie. 5 groups of movies were created, which capture movies with months differences: "0 - 4", "5 -8", "9 - 12", "13 - 24" and "Other" with the difference more than 24 months.
+
+```{r}
+# pre-processing data
+dvd_rel_date <- movies %>%
+  select(audience_score, dvd_rel_year, dvd_rel_month, dvd_rel_day, thtr_rel_date, thtr_rel_year) %>%
+  filter(thtr_rel_year > 2000, !is.na(dvd_rel_year)) %>%
+  mutate(thtr_rel_date = as.Date(thtr_rel_date, format = '%d-%m-%Y'),
+         dvd_rel_date = as.Date(paste0(dvd_rel_day, '-', dvd_rel_month, '-', dvd_rel_year), format = '%d-%m-%Y'),
+         diff_date = round((dvd_rel_date - thtr_rel_date)/30, digits = 0)) %>%
+  filter(diff_date >= 0) %>%
+# creating 5 groups of movies: 0 - 4 months difference, 5 - 8 months difference, 9 - 12 months difference, 13 - 24 months difference, more than 24 months difference
+  mutate(dvd_rel_bin = case_when (
+    diff_date <= 4 ~ '0 - 4',
+    diff_date <= 8 ~ '5 - 8',
+    diff_date <= 12 ~ '9 - 12',
+    diff_date <= 24 ~ '13 - 24',
+    TRUE ~ 'other'))
+
+dvd_rel_bin <- dvd_rel_date %>%
+  group_by(dvd_rel_bin) %>%
+  summarise(median = median(audience_score)) 
+
+# creating table with proportions to see the frequency of releasing a movie by days of the week
+prop_dvd <- table(dvd_rel_date$dvd_rel_bin)
+prop_dvd <- round(prop.table(prop_dvd)*100, digits = 1)
+prop_dvd <- as.data.frame(prop_dvd) 
+colnames(prop_dvd)[1] <- 'dvd_rel_bin'
+prop_dvd$dvd_rel_bin<- as.character(prop_dvd$dvd_rel_bin)
+dvd_rel_bin <- left_join(dvd_rel_bin, prop_dvd, by = 'dvd_rel_bin')
+
+  dvd_rel_bin <- dvd_rel_bin%>%
+  ungroup() %>%
+  arrange(Freq) %>%
+  mutate(dvd_rel_bin = factor(dvd_rel_bin, levels = dvd_rel_bin))
+
+
+ggplot(data = dvd_rel_bin, aes(x = dvd_rel_bin, y = median, fill = dvd_rel_bin)) +
+geom_bar(stat = "identity", width = 0.85, color="black") + 
+labs(title="Audience Score By DVD Release Bins", x= "DVD release bins in months", y= "Audience Score") +
+geom_text(aes(label = round(median)), vjust=1.6, color="white", size=3.5) +
+theme_classic() +
+scale_fill_discrete(name = 'Season') +
+geom_text(aes(label = paste(round(Freq), '%'), vjust = -0.3)) 
+
+```
+
+As is shown on the plot above 50% of the time DVD is released maximum 4 months after the movie premiere. However, these movies have the lowest median of audience score. The highest median has movies which DVD was released 13 - 24 months after the theatre premiere.  
+
+```{r}
+# introducing new variable to final dataset
+movies <- movies %>%
+  mutate(thtr_rel_date = as.Date(thtr_rel_date, format = '%d-%m-%Y'),
+         dvd_rel_date = as.Date(paste0(dvd_rel_day, '-', dvd_rel_month, '-', dvd_rel_year), format = '%d-%m-%Y'),
+         dvd_rel_date = round((dvd_rel_date - thtr_rel_date)/30, digits = 0)) %>%
+  mutate(dvd_rel_bin = case_when (
+    dvd_rel_date <= 4 & dvd_rel_date >= 0 ~ '0 - 4',
+    dvd_rel_date <= 8 ~ '5 - 8',
+    dvd_rel_date <= 12 ~ '9 - 12',
+    dvd_rel_date <= 24 ~ '13 - 24',
+    TRUE ~ 'other'))
+```
+ 
+### Academy Awards
+
+There were several variables pertaining to awards and nominations, all for the Academy Awards. These include best picture (nominated and win), best actor, actress, and director (all wins only).
+
+Best picture nominees and winners both had higher average audience scores. However, there is an outlier among Oscar winners. Well-known movie "Titanic" received a surprisingly low audience score.
+
+```{r}
+# Preparing data for plot, extracting outlier
+best_pic_outl <- movies %>%
+  filter(best_pic_win == 'yes') %>%
+  filter(audience_score == min(audience_score)) %>%
+  mutate(outlier = paste0(title, ', ', audience_score))
+
+
+grid.arrange(
+  ggplot(movies, aes(x = best_pic_nom, y = audience_score, fill = best_pic_nom)) + 
+  geom_boxplot() + 
+  theme_minimal() +
+  labs(title = "Oscar Nominated Movie?",
+       x = "",
+       y = "") +
+  scale_fill_discrete(guide = FALSE),
+  
+  ggplot(movies, aes(x = best_pic_win, y = audience_score, fill = best_pic_win)) + 
+    geom_boxplot() + 
+    theme_minimal() +
+    labs(title = "Oscar Winner Movie?",
+         x = "",
+         y = "") +
+    geom_text(data = best_pic_outl, aes(label = outlier),
+            vjust = 0, hjust = - 0.1, color = "black") +
+    scale_fill_discrete(guide = FALSE),
+  ncol = 2)
+
+```
+
+Best actress winners both had higher average audience scores, although for best actor there was no real difference.
+Average scores were higher for movies awarded best director.
+
+```{r}
+grid.arrange(
+  ggplot(movies, aes(x = best_actor_win, y = audience_score, fill = best_actor_win)) + 
+  geom_boxplot(width = 0.9) + 
+  theme_minimal() +
+  labs(title = "Oscar Winner Actor?",
+       x = "",
+       y = "Audience Score")+
+  scale_fill_discrete(guide = FALSE),  
+  
+  ggplot(movies, aes(x = best_actress_win, y = audience_score, fill = best_actress_win)) + 
+    geom_boxplot(width = 0.9) + 
+    theme_minimal() +
+    labs(title = "Oscar Winner Actress?",
+         x = " ",
+         y = "") +
+  scale_fill_discrete(guide = FALSE),
+  
+  ggplot(movies, aes(x = best_dir_win, y = audience_score, fill = best_dir_win)) + 
+    geom_boxplot(width = 0.9) + 
+    theme_minimal() +
+    labs(title = "Oscar Winner Director?",
+         x = " ",
+         y = "") +
+    scale_fill_discrete(guide = FALSE),
+  ncol = 3)
+```
+
+### Critics Score
+
+Another potential predictor of `audience-score` is `critics_score`. No surprise that there is a strong positive correlation between the two (R = 0.7), as can be seen on the chart below. Critic's reviews should more or less reflect the preference of the public.
+
+```{r}
+ggplot(data = movies, aes(x = critics_score, y = audience_score)) +
+  geom_point(color = "aquamarine3", alpha = 0.5, size = 2.5) +
+  geom_smooth(method = lm, color = "black", size = 0.5, se = FALSE) +
+   annotate(geom = "text", x = 90, y = 20, 
+           label = paste("R =", round(cor(movies$critics_score,
+                                          movies$audience_score,
+                                          use = "complete.obs"), digits = 2)),
+                                          color = "black", hjust = 0) +
+  labs(title = "Corellation between Critics Score and Audience Score",
+       x = "Critics Score",
+       y = "Audience Score") +
+  theme_classic()
+```
+
+We have examined all possible predictors of our metric of interest, explored their distributions and applied some transformations in order to optimize levels of categorical variables. On the way we have learned some interesting facts:
+
+<ul>
+<li> movies released in December tend to receive higher scores
+<li> over 70% of the movies were released on Friday
+<li> "Titanic" has the lowest audience score among Oscar-winning films presented in the data set
+<li> movies with Oscar winner actress have higher audience score, unlike movies with Oscar winner actor
+<li> average scores were higher for movies awarded best director.
+</ul>
+
+## Modeling
+
+Fitting a multiple linear regression model to predict movie popularity, we need to further remove some variables which contain meaningless information, they are:
+<ul>
+<li>`director`
+<li>`actor1`
+<li>`actor2`
+<li>`actor3`
+<li>`actor4`
+<li>`actor5`
+<li>`imdb_url`
+<li>`rt_url`
+</ul>
+
+Some variables are not applicable for prediction, such as `imdb_rating`, `imdb_num_votes` because, simply, these numbers will be unavailable before a movie is released. `audience_rating`, and `critics_rating` are also excluded, as these are a categorical interpretation of the numerical variables `audience_score`, `critics_score`, thus less informative.
+
+<ul>
+<li>`feature_film`
+<li>`genre`
+<li>`critics_score` 
+<li>`dvd_rel_bin`
+<li>`mpaa_new`
+<li>`oscar_season`
+<li>`summer_season`
+<li>`runtime`
+<li>`best_pic_nom`
+<li>`best_pic_win`
+<li>`best_actor_win`
+<li>`best_actress_win`
+<li>`best_dir_win`
+<li>`top200_box`
+</ul>
+
+```{r}
+model_df <- movies %>%
+  select(feature_film, genre, dvd_rel_bin, runtime, critics_score, mpaa_new, oscar_season, summer_season, audience_score, best_pic_nom, best_pic_win, best_actor_win, best_actress_win, best_dir_win, top200_box, weekday) 
+```
+
+Before getting started, we need to check for NAs.
+
+```{r}
+  which(is.na(model_df), arr.ind=TRUE) #finding the location of NA in new dataset
+```
+
+```{r}
+movies[334,1] #print the name of column which contains NA
+```
+
+Seems like 334th observation which corresponds to the movie The End Of America has a missing value in runtime column. It is not difficult to find and add missing information to the dataset. According to Wiki duration of the movie is 74 min (https://en.wikipedia.org/wiki/The_End_of_America_(film))  
+
+```{r}
+model_df[334,4] <- 74 #inserting a new value 
+any(is.na(model_df)) #checking for NA again
+```
+
+### Fitting the Model
+
+There are various methods to fit the MLR model, as well as a huge number of criteria to select one. In this analysis, I used forward and backward elimination, based on the Akaike Information Criterion. I will not go deep into details on how these methods work.   
+
+```{r}
+# Full model
+fit_full <- lm(audience_score ~ ., data = model_df)
+# Forward elimination with AIC
+for.aic <- step(lm(audience_score ~ 1, data = model_df), direction = "forward", 
+                scope = formula(fit_full), k = 2, trace = 0) 
+# Creating a data frame with adjusted R squared
+Adjusted_R.square <- data.frame("Method"=c("for.aic"), 
+                     "Adj.r.square"=c(summary(for.aic)$adj.r.square))
+Adjusted_R.square
+
+```
+
+The result of the `step` function is the model with the smallest AIC of all possible combinations of predictors. AIC estimates the relative amount of information lost by a given model: the less information a model loses, the higher the quality of that model.
+
+```{r}
+summary(for.aic)
+```
+
+From the summary above, we can say that adjusted $R^{2}$ 0.52, which means that 52% of variation explained by the independent variables that actually affect the dependent variable, `audience_score` in this case.
+
+We also see a pretty big F-score 80.8 on 641 degrees of freedom, which gives a very small p-value and it tells that response variable actually depends on explanatory variables in our model.
+
+
+## Model Diagnostic
+
+After fitting a regression model it is important to determine whether all the necessary model assumptions are valid before performing inference. If there are any violations, subsequent inferential procedures may be invalid resulting in faulty conclusions.
+
+### Linearity
+
+We want to see a linear relationship between response and explanatory variables in this data set. One way to check this is to visualize the residuals vs numerical explanatory variables on the plot.
+
+```{r}
+
+plot(model_df$critics_score, rstandard(for.aic),
+     main = " Standardize Residuals vs. Critics' Scores",
+     xlab = "Critics' Scores",
+     ylab = "Standardize Residuals")
+
+```
+
+```{r}
+plot(model_df$runtime, rstandard(for.aic),
+     main = "Standardized Residuals vs. Runtime",
+     xlab = "Runtimes (Minutes)",
+     ylab = "Standardized Residuals")
+```
+
+On the first plot, we can see that data points are fair, symmetrically distributed around 0. However, the assumption about linearity on the second plot violated and concerning. The data points are tightly clustered and would probably benefit from a deeper exploration of outliers.
+
+### Normality
+
+The assumption about nearly normal distributed residuals with mean 0 can be checked with histogram or normal probability plot.
+
+```{r}
+hist(for.aic$res,
+     main = "Distribution of Residuals",
+     xlab = "Residuals")
+
+```
+
+```{r}
+qqnorm(for.aic$res, main = "Normal Q-Q Plot")
+qqline(for.aic$res)
+```
+These plots indicate that residuals are normally distributed, hence the condition is satisfied.
+
+### Constant variability
+
+Also called homoscedasticity, this assumption is best tested plotting residuals vs fitted values.
+
+```{r}
+plot(for.aic$fitted.values, for.aic$res,
+     main = "Residuals vs. Predicted Scores",
+     xlab = "Predicted Scores",
+     ylab = "Residuals")
+```
+
+The residuals against the predicted scores look symmetrical. There is a slight fan shape indicating greater variability for lower-scoring movies. This indicates a problem that will affect the ability to make accurate predictions in those ranges, and normally it would be addressed (possibly by eliminating runtime from the model).
+
+### Residuals are independent
+
+Independent residuals equal to independent observations, as was mentioned at the beginning of the report, the data were randomly sampled from the population, hence we may suggest that all observation are independent of each other so are residuals. However, a good thing to check if the time series structure is suspected in the data, but to do this we need the information about the order in which the reviews were written. Unfortunately, we do not possess that information, and it is very unlikely that audience reviews would show much autocorrelation of this type so it is probably safe to ignore this issue.
+
+## Outliers
+
+One more important thing is to identify the presence of the extreme values in the data set because they can drastically bias the fit estimates and predictions. Plotting graph of Standardize residuals is one way to identify outliers.
+
+```{r}
+outlier_values <- rstandard(for.aic)
+plot(rstandard(for.aic),
+     ylab = "Standardize Residuals")
+abline(h = 2, col="red") 
+abline(h = -2, col = 'red') # add cutoff line
+text(x=1:length(outlier_values)+1, y=rstandard(for.aic), labels=ifelse(rstandard(for.aic) > 2 | rstandard(for.aic) < -2, names(rstandard(for.aic)),""), col="red")  # add labels
+```
+
+On the plot above we can see some points outside the range of 2 standard deviations from the mean 0. But are those outliers actually influential? High leverage points are shown on the plot below.
+
+```{r}
+n = nrow(model_df)
+leverage_values <- hatvalues(for.aic)
+plot(hatvalues(for.aic),
+     ylab = "Leverages")
+abline(h = 3*5/n, col = "red")
+text(x=1:length(leverage_values)+1, y = hatvalues(for.aic), labels=ifelse(hatvalues(for.aic) > 3*5/n, names(hatvalues(for.aic)),""), col="red")
+```
+In the analysis, we are interested in the points that are both outliers and influential. 
+
+```{r}
+outliers <- c(names(rstandard(for.aic)[rstandard(for.aic) > 2 | rstandard(for.aic) < -2]))
+leverage <- c(names(leverage_values[leverage_values > 3*5/n]))
+
+intersect(outliers, leverage)
+```
+
+Let's have a closer look at these high leverage outliers.
+
+```{r}
+cbind(movies[c(233, 259, 319, 466, 548), 1], model_df[c(233, 259, 319, 466, 548),c("audience_score", "critics_score", "runtime")])
+```
+
+Examing the table above, we can say that the first movie has an extremely long duration, and rest of the movies received quite high audience scores but very low critics scores, despite the fact that these two variables a highly correlated. Movies with duration more than 4 hours are very rare, hence it is safe to remove this observation from the data set. 
+
+```{r}
+# removing the observation 233
+model_df <- model_df[-233,]
+# re-fitting the model
+for.aic.650 <- lm(audience_score ~ runtime + best_pic_nom + critics_score + genre, data = model_df)
+
+summary(for.aic.650)
+```
+
+After re-fitting the model, we can spot a very small improvement of the parameters. Adjusted R^{2} became 0.5278 against 0.5249 and also some coefficients have changed, but this difference is very small. The good thing is that p-value for `runtime` variable has dropped from 0.057 to 0.011, it means that `runtime` is a significant predictor, and we became more confidente to include `runtime` variable in the final model. 
+
+How about the rest of the observation?
+```{r}
+# deleting outliers with contracting correlation between audience score and critics score
+model_df <- model_df[-c(233, 259, 319, 466, 548),]
+# fitting the model with new dataset
+for.aic.645 <- lm(audience_score ~ critics_score + runtime + best_pic_nom + genre, data = model_df)
+
+summary(for.aic.645)
+```
+
+After deleting the rest of the outliers and re-running lm function the adjusted $R^{2}$ decreased and residual standard error increased, we have not found any improvement. Hence, removing observations 259, 319, 466, 548 from the data set do not benefit the model.
+
+## Prediction
+
+Now, we come up to the most interesting part of the project, it is time to check the predicting accuracy of our model. To do this we will use a single movie Silence released in 2017, thus it is out of the scope of the dataset. All the details needed for prediction were obtained on [Rotten Tomatoes](https://www.rottentomatoes.com/m/silence_2017/) and [IMDB website](https://www.imdb.com/title/tt0490215/).
+
+```{r}
+silence <- data.frame(runtime = 161, genre = "Drama",  best_pic_nom = "no", critics_score = 83, feature_film = "Yes")
+predict_silence = predict(for.aic.650, silence, interval = "prediction", level = 0.95)
+predict_silence
+
+```
+
+The model predicted an audience score for "Silence" of 78, with a 95% prediction interval from 50 to 105. The actual audience score is 69, which falls within the prediction interval, i.e., where we would expect future observations to fall.
+
+## Conclusion
+
+The popularity of a movie is not an easy object to measure, explain or explore. There is a huge range of factors that can influence the popularity. These factors are hard to define. Mostly because it is the result of human perception. Two different persons with different background and experience could give absolutely opposite reviews on the same movie.
+
+That is why it is very complicated to fit a model for predicting audience score of the movie given the data in the sample, however, our model still provides more or less accurate results.
+
+On the way we have learned some interesting facts about movies:
+<ul>
+<li>Oscar nominated movies are usually longer and tend to receive higher audience scores than non-nominated.
+<li>almost 50% of movies have some restrictions to be watched by teens under age 17
+<li>critics scores indeed reflect 70% of public opinion on movies popularity
+<li>inviting Oscar-winning actress or actor does not really contribute much into the popularity of a movie
+</ul>
+
+Imperfect measures of popularity presented in dataset restrict the accuracy of the analysis. I would suggest to gather more data and add some new variables such as:
+<ul>
+<li> film budget
+<li> money spent for visual special effects
+<li> number of visual special effects
+<li> box office (numerical data)
+<li> expand genre with categories: fantasy, detective, thriller, criminal
+<li> number of crushed cars
+<li> number of dead bodies
+<li> facebook page likes of leading cast and director may be the better measurement of popularity rather than Academy awards
+</ul>
+
+
+
+
+
